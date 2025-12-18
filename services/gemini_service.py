@@ -24,71 +24,112 @@ class GeminiService:
             convert_system_message_to_human=True  # Gemini quirk
         )
     
-    async def generate_summary(self, content: str, api_key: str) -> dict:
+    async def generate_summary(self, content: str, api_key: str, language: str = "English") -> dict:
         """
-        Generate a summary with key points from course content.
+        Generate a summary, key points, and flashcards from course content.
         
-        Returns dict with: summary, key_points, audio_script
+        Returns dict with: summary, key_points, flashcards
         """
         llm = self._get_llm(api_key, temperature=0.3)  # Lower temp = more focused
         
         prompt = ChatPromptTemplate.from_messages([
             ("system", """You are an expert educational assistant. 
             Analyze the following course material and provide:
-            1. A concise summary (2-3 paragraphs)
-            2. Key points (5-7 bullet points of the most important concepts)
-            3. An audio script (a natural, spoken version of the summary for text-to-speech)
+            1. A concise summary/resume (2-3 paragraphs) capturing the core meaning.
+            2. Key points (5-7 bullet points of the most important concepts).
+            3. 5 study flashcards (Question/Answer pairs) testing key concepts.
             
-            Format your response as:
+            IMPORTANT INSTRUCTIONS:
+            - The output MUST be in {language}.
+            
+            Format your response exactly as:
             SUMMARY:
-            [Your summary here]
+            [Your summary in {language}]
             
             KEY_POINTS:
-            - Point 1
-            - Point 2
+            - [Point 1 in {language}]
+            - [Point 2 in {language}]
             ...
             
-            AUDIO_SCRIPT:
-            [Natural spoken version]
+            FLASHCARDS:
+            Front: [Question 1]
+            Back: [Answer 1]
+            
+            Front: [Question 2]
+            Back: [Answer 2]
+            ...
             """),
             ("human", "{content}")
-        ])
+        ])  
         
         chain = prompt | llm
-        response = await chain.ainvoke({"content": content[:15000]})  # Limit content size
-        
-        # Parse the response
-        return self._parse_summary_response(response.content)
+        try:
+            response = await chain.ainvoke({
+                "content": content[:15000],
+                "language": language
+            })
+            
+            # Parse the response
+            return self._parse_summary_response(response.content)
+            
+        except Exception as e:
+            print(f"Error in generate_summary: {e}")
+            raise e
+    
     
     def _parse_summary_response(self, response: str) -> dict:
         """Parse the structured response into a dictionary."""
         result = {
             "summary": "",
             "key_points": [],
-            "audio_script": ""
+            "flashcards": []
         }
         
-        sections = response.split("\n\n")
-        current_section = None
-        
-        for line in response.split("\n"):
-            if "SUMMARY:" in line:
-                current_section = "summary"
-            elif "KEY_POINTS:" in line:
-                current_section = "key_points"
-            elif "AUDIO_SCRIPT:" in line:
-                current_section = "audio_script"
-            elif current_section == "summary":
-                result["summary"] += line + " "
-            elif current_section == "key_points" and line.strip().startswith("-"):
-                result["key_points"].append(line.strip()[1:].strip())
-            elif current_section == "audio_script":
-                result["audio_script"] += line + " "
-        
-        # Clean up
-        result["summary"] = result["summary"].strip()
-        result["audio_script"] = result["audio_script"].strip()
-        
+        try:
+            current_section = None
+            current_card = {}
+            
+            for line in response.split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                    
+                if "SUMMARY:" in line.upper():
+                    current_section = "summary"
+                elif "KEY_POINTS:" in line.upper():
+                    current_section = "key_points"
+                elif "FLASHCARDS:" in line.upper():
+                    current_section = "flashcards"
+                elif current_section == "summary":
+                    result["summary"] += line + " "
+                elif current_section == "key_points" and line.startswith("-"):
+                    result["key_points"].append(line[1:].strip())
+                elif current_section == "flashcards":
+                    if line.upper().startswith("FRONT:"):
+                        if "front" in current_card and "back" in current_card:
+                            result["flashcards"].append(current_card)
+                            current_card = {}
+                        current_card["front"] = line.split(":", 1)[1].strip()
+                    elif line.upper().startswith("BACK:"):
+                        current_card["back"] = line.split(":", 1)[1].strip()
+            
+            # Add last card if exists
+            if "front" in current_card and "back" in current_card:
+                result["flashcards"].append(current_card)
+            
+            # Clean up
+            result["summary"] = result["summary"].strip()
+            
+            # If nothing parsed (fallback)
+            if not result["summary"]:
+                result["summary"] = response
+                
+        except Exception as e:
+            print(f"Error parsing response: {e}")
+            print(f"Raw response: {response}")
+            # Return raw text as summary if parsing totally fails
+            result["summary"] = response
+            
         return result
     
     async def answer_question(

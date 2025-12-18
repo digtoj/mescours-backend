@@ -56,6 +56,13 @@ async def upload_course(
     try:
         content = await file.read()
         
+        # 10MB limit
+        if len(content) > 10 * 1024 * 1024:
+             raise HTTPException(
+                status_code=413,
+                detail="File is too large. Maximum size is 10MB."
+            )
+            
         # Use the new extract_text method
         text, page_count, chunks = await document_service.extract_text(
             content, 
@@ -87,13 +94,14 @@ async def summarize_course(request: SummarizeRequest):
     try:
         result = await gemini_service.generate_summary(
             request.course_content,
-            request.api_key
+            request.api_key,
+            request.language
         )
         
         return SummaryResponse(
             summary=result["summary"],
             key_points=result["key_points"],
-            audio_script=result["audio_script"]
+            flashcards=result["flashcards"]
         )
         
     except Exception as e:

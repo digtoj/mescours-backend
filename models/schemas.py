@@ -16,12 +16,17 @@ class AnswerResponse(BaseModel):
 class SummarizeRequest(BaseModel):
     course_content: str
     api_key: str
+    language: str = "English"
+
+class Flashcard(BaseModel):
+    front: str
+    back: str
 
 #Response: Summary 
 class SummaryResponse(BaseModel):
     summary: str
     key_points: List[str]
-    audio_script: str
+    flashcards: List[Flashcard]
 
 class PDFExtractResponse(BaseModel):
     text: str
